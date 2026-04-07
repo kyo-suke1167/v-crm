@@ -1,0 +1,76 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// 👤 リスナー（顧客）のマスターデータ
+model Viewer {
+  id            String   @id @default(cuid())
+  youtubeId     String   @unique // YouTubeの内部IDやチャンネルID（重複防止の要！）
+  name          String   // リスナーの名前
+  iconUrl       String?  // アイコン画像のURL
+  
+  // リレーション（このリスナーが紐づくデータたち）
+  comments      Comment[]
+  superChats    SuperChat[]
+  giftedMemberships GiftedMembership[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// 🎬 配信（イベント）のマスターデータ
+model StreamEvent {
+  id            String   @id @default(cuid())
+  videoId       String   @unique // YouTubeの動画ID
+  title         String
+  publishedAt   DateTime // 配信日（ここで「2025年1月」などの期間絞り込みをするわ！）
+  
+  // リレーション
+  comments      Comment[]
+  superChats    SuperChat[]
+  giftedMemberships GiftedMembership[]
+
+  createdAt     DateTime @default(now())
+}
+
+// 💬 通常のコメントログ（出席率の計算に使う）
+model Comment {
+  id            String   @id @default(cuid())
+  viewerId      String
+  streamId      String
+  message       String
+  timestampText String   // "1:23:45" などの動画内時間
+
+  viewer        Viewer       @relation(fields: [viewerId], references: [id])
+  stream        StreamEvent  @relation(fields: [streamId], references: [id])
+}
+
+// 💸 スーパーチャット（スパチャ王決定戦に使う！）
+model SuperChat {
+  id            String   @id @default(cuid())
+  viewerId      String
+  streamId      String
+  amount        Int      // 🌟 金額（日本円換算などの数値）
+  currency      String   // "JPY" や "USD"
+  message       String?
+
+  viewer        Viewer       @relation(fields: [viewerId], references: [id])
+  stream        StreamEvent  @relation(fields: [streamId], references: [id])
+}
+
+// 🎁 メンバーシップギフト（メンギフ王決定戦に使う！）
+model GiftedMembership {
+  id            String   @id @default(cuid())
+  viewerId      String
+  streamId      String
+  count         Int      // 一度に投げたギフトの数（5個とか10個とか）
+
+  viewer        Viewer       @relation(fields: [viewerId], references: [id])
+  stream        StreamEvent  @relation(fields: [streamId], references: [id])
+}

@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // 🌟 ここにメインPCのローカルIPを追加して、アクセスを許可するわ！
+  allowedDevOrigins: ['192.168.11.21'],
 };
 
 export default nextConfig;
