@@ -46,3 +46,19 @@ dev.db
 *.sqlite3
 *.live_chat.json
 video_archive/
+
+# --- V-CRM Specific ---
+# データベースファイルとバックアップをアップロードしない！
+*.db
+*.db-journal
+
+# パスワードなどの環境変数（絶対秘密！）
+.env
+.env.local
+
+# 一時保存ファイルと抽出キャッシュ
+tmp_chats/
+rates.json
+progress.json*.backup
+*_backup_*.db
+dev.db.backup

@@ -1,20 +1,9 @@
+// app/api/rankings/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { getCurrencyCaseSql } from '@/lib/exchange';
 
 export const dynamic = 'force-dynamic';
-
-// 💱 魔法の辞書：固定為替レート（ベースはJPY=1）
-// ※ゆくゆくは外部APIで当日のレートを取得してここに当てはめれば完璧よ！
-const EXCHANGE_RATES: Record<string, number> = {
-  'JPY': 1,
-  'USD': 150.0,
-  'TWD': 4.7,   // 台湾ドル
-  'KRW': 0.11,  // 韓国ウォン
-  'EUR': 160.0,
-  'HKD': 19.0,  // 香港ドル
-  'GBP': 190.0, // 🇬🇧 追加：イギリス・ポンド
-  'PHP': 2.6,   // 🇵🇭 追加：フィリピン・ペソ
-};
 
 export async function POST(request: Request) {
   try {
@@ -22,83 +11,127 @@ export async function POST(request: Request) {
     const start = new Date(`${startDate}T00:00:00Z`);
     const end = new Date(`${endDate}T23:59:59Z`);
 
-    // 1️⃣ 期間内の「全配信リスト」を取得（欠席判定のためにフロントに送る！）
-    const allStreams = await prisma.streamEvent.findMany({
-      where: { publishedAt: { gte: start, lte: end } },
-      orderBy: { publishedAt: 'asc' },
-      select: { id: true, videoId: true, title: true, publishedAt: true }
+    // 1️⃣ 期間内の配信数をカウント
+    const totalStreams = await prisma.streamEvent.count({
+      where: { publishedAt: { gte: start, lte: end } }
     });
-
-    const streamIds = allStreams.map(s => s.id);
-    const totalStreams = streamIds.length;
 
     if (totalStreams === 0) {
-      return NextResponse.json({ success: true, topSpachas: [], topAttendance: [], totalStreams: 0, allStreams: [] });
+      return NextResponse.json({ 
+        success: true, 
+        topSpachas: [], 
+        topAttendance: [], 
+        topComments: [], 
+        totalStreams: 0, 
+        allStreams: [], 
+        periodTotalAmount: 0,
+        totalActiveListeners: 0 
+      });
     }
 
-    // 2️⃣ スパチャ集計（為替レート変換対応エンジン）
-    const superChats = await prisma.superChat.findMany({
-      where: { streamId: { in: streamIds } },
-      include: { viewer: true }
-    });
+    // 2️⃣ 最新の為替レートSQLスニペットを生成
+    const dynamicCurrencySql = await getCurrencyCaseSql();
 
-    const spachaMap = new Map<string, any>();
-    for (const sc of superChats) {
-      const vId = sc.viewerId;
-      if (!spachaMap.has(vId)) {
-        spachaMap.set(vId, { name: sc.viewer.name, iconUrl: sc.viewer.iconUrl, totalAmount: 0 });
-      }
-      const user = spachaMap.get(vId);
+    // 🌟 3️⃣ 5つの重い集計処理を完全並列で実行！
+    // 修正ポイント：左側の変数リストに「totalActiveRaw」を追加したわよ！
+    const [topSpachasRaw, topAttendanceRaw, topCommentsRaw, totalAmountRaw, totalActiveRaw] = await Promise.all([
       
-      // 💱 データベースのcurrencyを見てレート計算（無い場合は1倍のJPY扱い）
-      const rate = EXCHANGE_RATES[sc.currency || 'JPY'] || 1; 
-      user.totalAmount += sc.amount * rate;
-    }
+      // ① スパチャ王
+      prisma.$queryRaw`
+        SELECT v.id as viewerId, v.name, v.iconUrl, 
+          CAST(SUM(${dynamicCurrencySql}) AS INTEGER) as totalAmount
+        FROM SuperChat s
+        JOIN Viewer v ON s.viewerId = v.id
+        JOIN StreamEvent e ON s.streamId = e.id
+        WHERE e.publishedAt >= ${start} AND e.publishedAt <= ${end}
+        GROUP BY v.id
+        ORDER BY totalAmount DESC
+        LIMIT 100;
+      `,
 
-    const topSpachas = Array.from(spachaMap.values())
-      .sort((a, b) => b.totalAmount - a.totalAmount)
-      .slice(0, 100)
-      .map(v => ({ ...v, totalAmount: Math.floor(v.totalAmount) })); // 日本円なので小数点切り捨て！
+      // ② 出席率王
+      prisma.$queryRaw`
+        SELECT v.id as viewerId, v.name, v.iconUrl, CAST(COUNT(DISTINCT c.streamId) AS INTEGER) as count
+        FROM Comment c
+        JOIN Viewer v ON c.viewerId = v.id
+        JOIN StreamEvent e ON c.streamId = e.id
+        WHERE e.publishedAt >= ${start} AND e.publishedAt <= ${end}
+        GROUP BY v.id
+        ORDER BY count DESC
+        LIMIT 100;
+      `,
 
-    // 3️⃣ 出席率集計（誰がどの「枠ID」にコメントしたかを記録する）
-    const comments = await prisma.comment.findMany({
-      where: { streamId: { in: streamIds } },
-      select: { viewerId: true, streamId: true, viewer: { select: { name: true, iconUrl: true } } }
+      // ③ コメント王
+      prisma.$queryRaw`
+        SELECT v.id as viewerId, v.name, v.iconUrl, CAST(COUNT(c.id) AS INTEGER) as count
+        FROM Comment c
+        JOIN Viewer v ON c.viewerId = v.id
+        JOIN StreamEvent e ON c.streamId = e.id
+        WHERE e.publishedAt >= ${start} AND e.publishedAt <= ${end}
+        GROUP BY v.id
+        ORDER BY count DESC
+        LIMIT 100;
+      `,
+
+      // ④ 期間内の全スパチャ総額
+      prisma.$queryRaw`
+        SELECT CAST(SUM(${dynamicCurrencySql}) AS INTEGER) as total
+        FROM SuperChat s
+        JOIN StreamEvent e ON s.streamId = e.id
+        WHERE e.publishedAt >= ${start} AND e.publishedAt <= ${end};
+      `,
+
+      // ⑤ 期間内にコメントした「全アクティブリスナー数」
+      prisma.$queryRaw`
+        SELECT CAST(COUNT(DISTINCT c.viewerId) AS INTEGER) as totalActive
+        FROM Comment c
+        JOIN StreamEvent e ON c.streamId = e.id
+        WHERE e.publishedAt >= ${start} AND e.publishedAt <= ${end};
+      `
+    ]);
+
+    // 欠席判定用の詳細取得
+    const topAttendanceViewerIds = (topAttendanceRaw as any[]).map(user => user.viewerId);
+    
+    const attendanceDetails = await prisma.comment.findMany({
+      where: {
+        viewerId: { in: topAttendanceViewerIds },
+        stream: { publishedAt: { gte: start, lte: end } }
+      },
+      select: { viewerId: true, streamId: true },
+      distinct: ['viewerId', 'streamId']
     });
 
-    const attendanceMap = new Map<string, { name: string, iconUrl: string, attendedStreamIds: Set<string> }>();
-    for (const c of comments) {
-        if (!attendanceMap.has(c.viewerId)) {
-          // 🌟 ?. と || "" を使って「もしデータが無くても絶対に文字列にする」魔法！
-          attendanceMap.set(c.viewerId, { 
-            name: c.viewer?.name || "匿名", 
-            iconUrl: c.viewer?.iconUrl || "", 
-            attendedStreamIds: new Set() 
-          });
-        }
-        attendanceMap.get(c.viewerId)!.attendedStreamIds.add(c.streamId);
-      }
+    const attendedMap = new Map<string, Set<string>>();
+    for (const detail of attendanceDetails) {
+      if (!attendedMap.has(detail.viewerId)) attendedMap.set(detail.viewerId, new Set());
+      attendedMap.get(detail.viewerId)!.add(detail.streamId);
+    }
 
-    const topAttendance = Array.from(attendanceMap.values())
-      .map(v => ({
-        name: v.name,
-        iconUrl: v.iconUrl,
-        count: v.attendedStreamIds.size,
-        attendedStreamIds: Array.from(v.attendedStreamIds) // Setを配列に戻してフロントへ送る
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 100);
+    // 配信リストの取得
+    const allStreams = await prisma.streamEvent.findMany({
+      where: { publishedAt: { gte: start, lte: end } },
+      orderBy: { publishedAt: 'desc' },
+      select: { id: true, videoId: true, title: true, publishedAt: true },
+      take: 2000
+    });
+
+    const formatUser = (u: any) => ({ viewerId: u.viewerId, name: u.name || "匿名", iconUrl: u.iconUrl || "" });
 
     return NextResponse.json({
       success: true,
-      topSpachas,
-      topAttendance,
+      topSpachas: (topSpachasRaw as any[]).map(s => ({ ...formatUser(s), totalAmount: Number(s.totalAmount || 0) })),
+      topAttendance: (topAttendanceRaw as any[]).map(user => ({ ...formatUser(user), count: Number(user.count || 0), attendedStreamIds: Array.from(attendedMap.get(user.viewerId) || []) })),
+      topComments: (topCommentsRaw as any[]).map(c => ({ ...formatUser(c), count: Number(c.count || 0) })),
       totalStreams,
-      allStreams // 🌟 これが欠席リストの割り出しに必須のデータよ！
+      allStreams,
+      periodTotalAmount: Number((totalAmountRaw as any)[0]?.total || 0),
+      // 🌟 修正：totalActiveRaw を使うように変更！
+      totalActiveListeners: Number((totalActiveRaw as any)[0]?.totalActive || 0)
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("ランキング集計エラー:", error);
-    return NextResponse.json({ success: false, error: '集計に失敗しました' }, { status: 500 });
+    return NextResponse.json({ success: false, error: '処理に失敗しました。' }, { status: 500 });
   }
 }

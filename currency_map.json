@@ -1,0 +1,22 @@
+{
+    "¥": "JPY",
+    "￥": "JPY",
+    "円": "JPY",
+    "US$": "USD",
+    "MX$": "MXN",
+    "NT$": "TWD",
+    "HK$": "HKD",
+    "CA$": "CAD",
+    "AU$": "AUD",
+    "A$": "AUD",
+    "SG$": "SGD",
+    "€": "EUR",
+    "£": "GBP",
+    "₩": "KRW",
+    "₱": "PHP",
+    "THB": "THB",
+    "IDR": "IDR",
+    "MYR": "MYR",
+    "ARS": "ARS",
+    "$": "USD"
+  }

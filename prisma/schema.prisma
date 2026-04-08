@@ -10,67 +10,85 @@ datasource db {
 
 // 👤 リスナー（顧客）のマスターデータ
 model Viewer {
-  id            String   @id @default(cuid())
-  youtubeId     String   @unique // YouTubeの内部IDやチャンネルID（重複防止の要！）
-  name          String   // リスナーの名前
-  iconUrl       String?  // アイコン画像のURL
+  id                String             @id @default(cuid())
+  youtubeId         String             @unique // YouTubeの内部IDやチャンネルID（重複防止の要！）
+  name              String             // リスナーの名前
+  iconUrl           String?            // アイコン画像のURL
   
   // リレーション（このリスナーが紐づくデータたち）
-  comments      Comment[]
-  superChats    SuperChat[]
+  comments          Comment[]
+  superChats        SuperChat[]
   giftedMemberships GiftedMembership[]
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 // 🎬 配信（イベント）のマスターデータ
 model StreamEvent {
-  id            String   @id @default(cuid())
-  videoId       String   @unique // YouTubeの動画ID
-  title         String
-  publishedAt   DateTime // 配信日（ここで「2025年1月」などの期間絞り込みをするわ！）
+  id                String             @id @default(cuid())
+  videoId           String             @unique // YouTubeの動画ID
+  title             String
+  publishedAt       DateTime // 配信日（ここで「2025年1月」などの期間絞り込みをするわ！）
   
   // リレーション
-  comments      Comment[]
-  superChats    SuperChat[]
+  comments          Comment[]
+  superChats        SuperChat[]
   giftedMemberships GiftedMembership[]
 
-  createdAt     DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  // 🌟 【追加】期間での絞り込みを爆速にするインデックス！
+  @@index([publishedAt])
 }
 
 // 💬 通常のコメントログ（出席率の計算に使う）
 model Comment {
-  id            String   @id @default(cuid())
+  id            String       @id @default(cuid())
   viewerId      String
   streamId      String
   message       String
-  timestampText String   // "1:23:45" などの動画内時間
+  timestampText String       // "1:23:45" などの動画内時間
 
   viewer        Viewer       @relation(fields: [viewerId], references: [id])
   stream        StreamEvent  @relation(fields: [streamId], references: [id])
+
+  // 🌟 【追加】リスナー別・配信別の集計を爆速にするインデックス！
+  @@index([viewerId])
+  @@index([streamId])
 }
 
-// 💸 スーパーチャット（スパチャ王決定戦に使う！）
+// 💸 スーパーチャット（🌟 ELTアーキテクチャ対応！）
 model SuperChat {
-  id            String   @id @default(cuid())
-  viewerId      String
-  streamId      String
-  amount        Int      // 🌟 金額（日本円換算などの数値）
-  currency      String   // "JPY" や "USD"
-  message       String?
+  id         String       @id @default(cuid())
+  viewerId   String
+  streamId   String
+  amount     Float        // 🌟 【修正】外貨の小数点を正確に保存するため Int から Float に変更！
+  currency   String       @default("UNKNOWN") // 変換後の通貨コード
+  rawSymbol  String       @default("")        // 🌟 【追加】YouTubeの生の記号（例: "MX$"）
+  message    String?
+  createdAt  DateTime     @default(now())
 
-  viewer        Viewer       @relation(fields: [viewerId], references: [id])
-  stream        StreamEvent  @relation(fields: [streamId], references: [id])
+  viewer     Viewer       @relation(fields: [viewerId], references: [id])
+  stream     StreamEvent  @relation(fields: [streamId], references: [id])
+
+  // 🌟 【追加】リスナー別・配信別のスパチャ集計を爆速に！
+  @@index([viewerId])
+  @@index([streamId])
 }
 
 // 🎁 メンバーシップギフト（メンギフ王決定戦に使う！）
 model GiftedMembership {
-  id            String   @id @default(cuid())
-  viewerId      String
-  streamId      String
-  count         Int      // 一度に投げたギフトの数（5個とか10個とか）
+  id         String       @id @default(cuid())
+  viewerId   String
+  streamId   String
+  count      Int          // 一度に投げたギフトの数（5個とか10個とか）
+  createdAt  DateTime     @default(now()) // 🌟 時系列で追えるように作成日時を追加
 
-  viewer        Viewer       @relation(fields: [viewerId], references: [id])
-  stream        StreamEvent  @relation(fields: [streamId], references: [id])
+  viewer     Viewer       @relation(fields: [viewerId], references: [id])
+  stream     StreamEvent  @relation(fields: [streamId], references: [id])
+
+  // 🌟 【追加】メンギフ集計も爆速に！
+  @@index([viewerId])
+  @@index([streamId])
 }
