@@ -2,6 +2,71 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 
+const currencyToFlag: Record<string, string> = {
+  // --- 主要通貨 ---
+  JPY: "🇯🇵", // 日本円
+  USD: "🇺🇸", // 米ドル
+  EUR: "🇪🇺", // ユーロ
+  GBP: "🇬🇧", // 英ポンド
+
+  // --- アジア・オセアニア ---
+  TWD: "🇹🇼", // 台湾ドル
+  HKD: "🇭🇰", // 香港ドル
+  KRW: "🇰🇷", // 韓国ウォン
+  SGD: "🇸🇬", // シンガポールドル
+  MYR: "🇲🇾", // マレーシアリンギット
+  IDR: "🇮🇩", // インドネシアルピア
+  PHP: "🇵🇭", // フィリピンペソ
+  THB: "🇹🇭", // タイバーツ
+  VND: "🇻🇳", // ベトナムドン
+  INR: "🇮🇳", // インドルピー
+  AUD: "🇦🇺", // オーストラリアドル
+  NZD: "🇳🇿", // ニュージーランドドル
+
+  // --- 北米・中南米 ---
+  CAD: "🇨🇦", // カナダドル
+  MXN: "🇲🇽", // メキシコペソ
+  BRL: "🇧🇷", // ブラジルレアル
+  ARS: "🇦🇷", // アルゼンチンペソ
+  CLP: "🇨🇱", // チリペソ
+  COP: "🇨🇴", // コロンビアペソ
+  PEN: "🇵🇪", // ペルーソル
+  GTQ: "🇬🇹", // グアテマラケツァル
+  BOB: "🇧🇴", // ボリビアボリビアーノ
+  HNL: "🇭🇳", // ホンジュラスレンピラ
+  CRC: "🇨🇷", // コスタリカコロン
+
+  // --- ヨーロッパ ---
+  CHF: "🇨🇭", // スイスフラン
+  SEK: "🇸🇪", // スウェーデンクローナ
+  NOK: "🇳🇴", // ノルウェークローネ
+  DKK: "🇩🇰", // デンマーククローネ
+  PLN: "🇵🇱", // ポーランドズウォティ
+  HUF: "🇭🇺", // ハンガリーフォリント
+  CZK: "🇨🇿", // チェココルナ
+  RON: "🇷🇴", // ルーマニアレウ
+  BGN: "🇧🇬", // ブルガリアレフ
+  MKD: "🇲🇰", // 北マケドニアデナール
+
+  // --- 中東・アフリカ ---
+  ILS: "🇮🇱", // イスラエル新シェケル
+  TRY: "🇹🇷", // トルコリラ
+  SAR: "🇸🇦", // サウジアラビアリヤル
+  AED: "🇦🇪", // UAEディルハム
+  ZAR: "🇿🇦", // 南アフリカランド
+};
+
+const currencyToName: Record<string, string> = {
+  JPY: "日本", TWD: "台湾", USD: "アメリカ", HKD: "香港", SGD: "シンガポール",
+  KRW: "韓国", MXN: "メキシコ", CAD: "カナダ", AUD: "オーストラリア", GBP: "イギリス",
+  EUR: "ヨーロッパ", BRL: "ブラジル", PHP: "フィリピン", INR: "インド", VND: "ベトナム",
+  THB: "タイ", MYR: "マレーシア", IDR: "インドネシア", ARS: "アルゼンチン", CLP: "チリ",
+  PEN: "ペルー", SEK: "スウェーデン", NOK: "ノルウェー", DKK: "デンマーク", CHF: "スイス",
+  ILS: "イスラエル", TRY: "トルコ", SAR: "サウジアラビア", AED: "UAE", ZAR: "南アフリカ",
+  GTQ: "グアテマラ", BOB: "ボリビア", HNL: "ホンジュラス", CRC: "コスタリカ", PLN: "ポーランド",
+  HUF: "ハンガリー", CZK: "チェコ", RON: "ルーマニア", BGN: "ブルガリア", MKD: "北マケドニア"
+};
+
 // データ構造の型定義
 type Stream = {
   id: string;
@@ -31,6 +96,7 @@ export default function VcrmDashboard() {
   } | null>(null);
 
   const [isAdmin, setIsAdmin] = useState(false); // 🌟 管理者かどうか
+  const [showTotalBreakdown, setShowTotalBreakdown] = useState(false); // 🌟 全体内訳用
 
   // 🌟 ページ読み込み時に、過去にログインしたかチェック（リロード対策）
   useEffect(() => {
@@ -76,6 +142,8 @@ export default function VcrmDashboard() {
     iconUrl: string;
   } | null>(null);
   const [viewerDetail, setViewerDetail] = useState<any>(null);
+
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   const [progress, setProgress] = useState({
     isRunning: false,
@@ -146,6 +214,9 @@ export default function VcrmDashboard() {
   ) => {
     setSelectedViewer({ name, iconUrl });
     setViewerDetail(null); // 一旦ローディング状態にする
+
+    setShowBreakdown(false);
+
     try {
       const res = await fetch("/api/viewer-detail", {
         method: "POST",
@@ -279,36 +350,60 @@ export default function VcrmDashboard() {
 
         {/* 集計結果がある時だけ表示するサマリーエリア */}
         {rankings && !isSearching && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in fade-in slide-in-from-top-4 duration-500">
-            <div className="bg-gradient-to-br from-indigo-900/40 to-gray-900 border border-indigo-500/30 p-6 rounded-2xl shadow-lg flex flex-col items-center justify-center">
-              <p className="text-gray-400 text-xs font-bold mb-2 tracking-widest">
-                期間内スパチャ総額
-              </p>
-              <p className="text-4xl font-black text-yellow-400 tracking-tighter">
-                <span className="text-xl mr-1">¥</span>
-                {(rankings as any).periodTotalAmount?.toLocaleString()}
-              </p>
+          <div className="flex flex-col gap-6 animate-in fade-in slide-in-from-top-4 duration-500">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* 🌟 期間内スパチャ総額（ボタン化！） */}
+              <button 
+                onClick={() => setShowTotalBreakdown(!showTotalBreakdown)}
+                className="bg-gradient-to-br from-indigo-900/40 to-gray-900 border border-indigo-500/30 p-6 rounded-2xl shadow-lg flex flex-col items-center justify-center cursor-pointer hover:border-indigo-400 transition-all group relative"
+              >
+                <div className="absolute top-2 right-3 text-indigo-500/50 group-hover:text-indigo-400 text-xs font-bold">
+                  内訳を見る ▼
+                </div>
+                <p className="text-gray-400 text-xs font-bold mb-2 tracking-widest">
+                  期間内スパチャ総額
+                </p>
+                <p className="text-4xl font-black text-yellow-400 tracking-tighter">
+                  <span className="text-xl mr-1">¥</span>
+                  {(rankings as any).periodTotalAmount?.toLocaleString()}
+                </p>
+              </button>
+
+              <div className="bg-gradient-to-br from-purple-900/40 to-gray-900 border border-purple-500/30 p-6 rounded-2xl shadow-lg flex flex-col items-center justify-center">
+                <p className="text-gray-400 text-xs font-bold mb-2 tracking-widest">期間内 配信数</p>
+                <p className="text-4xl font-black text-purple-400">{rankings.totalStreams} <span className="text-xl">枠</span></p>
+              </div>
+              <div className="bg-gradient-to-br from-emerald-900/40 to-gray-900 border border-emerald-500/30 p-6 rounded-2xl shadow-lg flex flex-col items-center justify-center">
+                <p className="text-gray-400 text-xs font-bold mb-2 tracking-widest">アクティブリスナー数</p>
+                <p className="text-4xl font-black text-emerald-400">{(rankings as any).totalActiveListeners?.toLocaleString()} <span className="text-xl">名</span></p>
+              </div>
             </div>
 
-            <div className="bg-gradient-to-br from-purple-900/40 to-gray-900 border border-purple-500/30 p-6 rounded-2xl shadow-lg flex flex-col items-center justify-center">
-              <p className="text-gray-400 text-xs font-bold mb-2 tracking-widest">
-                期間内 配信数
-              </p>
-              <p className="text-4xl font-black text-purple-400">
-                {rankings.totalStreams} <span className="text-xl">枠</span>
-              </p>
-            </div>
-
-            <div className="bg-gradient-to-br from-emerald-900/40 to-gray-900 border border-emerald-500/30 p-6 rounded-2xl shadow-lg flex flex-col items-center justify-center">
-              <p className="text-gray-400 text-xs font-bold mb-2 tracking-widest">
-                アクティブリスナー数
-              </p>
-              <p className="text-4xl font-black text-emerald-400">
-                {/* 🌟 100名+ ではなく、APIから来た本物の人数を表示！ */}
-                {(rankings as any).totalActiveListeners?.toLocaleString()}{" "}
-                <span className="text-xl">名</span>
-              </p>
-            </div>
+            {/* 🌟 展開される全体の内訳パネル */}
+            {showTotalBreakdown && (rankings as any).periodCurrencyBreakdown && (
+              <div className="bg-gray-900 border border-indigo-500/50 rounded-xl p-6 shadow-xl animate-in fade-in slide-in-from-top-2">
+                <p className="text-indigo-400 font-bold mb-4 flex items-center gap-2 border-b border-gray-800 pb-2">
+                  <span>🌐</span> グローバル通貨内訳 (期間全体)
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                  {(rankings as any).periodCurrencyBreakdown.map((item: any, idx: number) => (
+                    <div key={idx} className="bg-gray-800/80 p-3 rounded-lg border border-gray-700">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-gray-400">
+                          {currencyToFlag[item.currency]} {item.currency}
+                        </span>
+                        <span className="text-sm text-yellow-400 font-bold">
+                          ¥{Math.round(item.totalAmount * item.rate).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-gray-500 font-mono">
+                        {item.rawSymbol} {item.totalAmount.toLocaleString()} × {item.rate.toFixed(2)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -355,6 +450,12 @@ export default function VcrmDashboard() {
                       )}
                       <span className="font-bold truncate w-24 text-indigo-300 hover:text-indigo-200 underline decoration-indigo-500/30">
                         {v.name}
+                      </span>
+                      <span
+                        className="text-sm opacity-80"
+                        title={v.primaryCurrency}
+                      >
+                        {currencyToFlag[v.primaryCurrency] || "🌐"}
                       </span>
                     </div>
                     <span className="text-yellow-400 font-bold">
@@ -731,100 +832,140 @@ export default function VcrmDashboard() {
         )}
       </div>
       {/* 🌟 リスナー詳細モーダル（クリックで出現！） */}
-      {selectedViewer && (
-        <div
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          onClick={() => setSelectedViewer(null)}
-        >
+      {selectedViewer && (() => {
+        // 🌟 【追加魔法】JPY換算額でソートし、「真の主力通貨」を決定する
+        const sortedBreakdown = viewerDetail?.currencyBreakdown 
+          ? [...viewerDetail.currencyBreakdown].sort((a: any, b: any) => (b.totalAmount * b.rate) - (a.totalAmount * a.rate))
+          : [];
+        const topCurrency = sortedBreakdown[0]; // これが本当の一番投げている通貨！
+
+        return (
           <div
-            className="bg-gray-900 border border-indigo-500/50 rounded-2xl shadow-[0_0_40px_rgba(99,102,241,0.3)] w-full max-w-md overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setSelectedViewer(null)}
           >
-            <div className="p-6 bg-gradient-to-b from-indigo-900/40 to-transparent flex flex-col items-center border-b border-gray-800">
-              {selectedViewer.iconUrl ? (
-                <img
-                  src={selectedViewer.iconUrl}
-                  className="w-24 h-24 rounded-full border-4 border-gray-800 shadow-xl mb-4"
-                />
-              ) : (
-                <div className="w-24 h-24 rounded-full bg-gray-700 border-4 border-gray-800 mb-4"></div>
-              )}
-              <h2 className="text-2xl font-bold text-white text-center break-all">
-                {selectedViewer.name}
-              </h2>
-            </div>
+            <div
+              className="bg-gray-900 border border-indigo-500/50 rounded-2xl shadow-[0_0_40px_rgba(99,102,241,0.3)] w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* モーダルの上部（国名と国旗の追加） */}
+              <div className="p-6 bg-gradient-to-b from-indigo-900/40 to-transparent flex flex-col items-center border-b border-gray-800 shrink-0">
+                {selectedViewer.iconUrl ? (
+                  <img src={selectedViewer.iconUrl} className="w-24 h-24 rounded-full border-4 border-gray-800 shadow-xl mb-4" />
+                ) : (
+                  <div className="w-24 h-24 rounded-full bg-gray-700 border-4 border-gray-800 mb-4"></div>
+                )}
+                <h2 className="text-2xl font-bold text-white text-center break-all">
+                  {selectedViewer.name}
+                </h2>
+                {/* 🌟 真の主力国旗を表示！ */}
+                {topCurrency && (
+                  <p className="mt-2 text-sm font-bold px-3 py-1 bg-gray-800 rounded-full border border-gray-700 text-gray-300">
+                    {currencyToFlag[topCurrency.currency]} {currencyToName[topCurrency.currency] || "不明"} ({topCurrency.currency})
+                  </p>
+                )}
+              </div>
 
-            <div className="p-6 space-y-6">
-              {!viewerDetail ? (
-                <div className="flex justify-center py-8">
-                  <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              ) : (
-                <>
-                  <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700">
-                    <p className="text-gray-400 text-xs font-bold mb-1">
-                      初めてコメントした配信
-                    </p>
-                    {viewerDetail.firstStream ? (
-                      <div>
-                        <p className="text-white font-medium text-sm truncate">
-                          {viewerDetail.firstStream.title}
+              <div className="p-6 space-y-6 overflow-y-auto">
+                {!viewerDetail ? (
+                  <div className="flex justify-center py-8">
+                    <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 flex flex-col justify-center">
+                        <p className="text-gray-400 text-xs font-bold mb-1">
+                          初めてコメントした配信
                         </p>
-                        <p className="text-indigo-300 text-xs mt-1">
-                          📅{" "}
-                          {new Date(
-                            viewerDetail.firstStream.publishedAt,
-                          ).toLocaleDateString()}
-                        </p>
+                        {viewerDetail.firstStream ? (
+                          <div>
+                            <p className="text-white font-medium text-sm truncate" title={viewerDetail.firstStream.title}>
+                              {viewerDetail.firstStream.title}
+                            </p>
+                            <p className="text-indigo-300 text-xs mt-1 font-mono">
+                              📅 {new Date(viewerDetail.firstStream.publishedAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                        ) : (
+                          <p className="text-gray-500 text-sm">データなし</p>
+                        )}
                       </div>
-                    ) : (
-                      <p className="text-gray-500 text-sm">データなし</p>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-center flex flex-col justify-center">
+                          <p className="text-gray-400 text-[10px] font-bold mb-1">出席率</p>
+                          <p className="text-lg font-bold text-blue-400">
+                            {viewerDetail.attendedCount} <span className="text-[10px] text-gray-500">/ {viewerDetail.totalStreams}</span>
+                          </p>
+                          <p className="text-[10px] font-bold text-blue-300 mt-1">
+                            ({viewerDetail.totalStreams > 0 ? Math.round((viewerDetail.attendedCount / viewerDetail.totalStreams) * 100) : 0}%)
+                          </p>
+                        </div>
+                        <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-center flex flex-col justify-center">
+                          <p className="text-gray-400 text-[10px] font-bold mb-1">累計コメント</p>
+                          <p className="text-lg font-bold text-emerald-400">
+                            {viewerDetail.totalComments.toLocaleString()} <span className="text-[10px] text-gray-500">回</span>
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 🌟 累計スパチャ額（中央寄せ＆目立たせる！） */}
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 p-6 rounded-xl flex flex-col items-center justify-center text-center shadow-inner">
+                      <p className="text-yellow-500/60 text-xs font-bold uppercase tracking-wider mb-2">
+                        リスナー累計スパチャ額
+                      </p>
+                      <p className="text-5xl font-black text-yellow-400 font-mono tracking-tighter">
+                        ¥{viewerDetail.totalSpacha.toLocaleString()}
+                      </p>
+                    </div>
+
+                    {/* 🌟 換算前の生データ（証拠）＆計算式 */}
+                    {sortedBreakdown.length > 0 && (
+                      <div className="bg-gray-800/50 p-4 rounded-xl border border-gray-700 mt-4">
+                        <p className="text-gray-400 text-xs font-bold mb-3 border-b border-gray-700 pb-2 flex items-center gap-2">
+                          <span>🔍</span> 換算前の生データ（証拠）と計算式
+                        </p>
+                        {/* 🌟 space-y-3 から grid (2列) に変更！ */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {/* map対象も viewerDetail ではなく sortedBreakdown に変更！ */}
+                          {sortedBreakdown.map((item: any, idx: number) => (
+                            <div key={idx} className="bg-gray-900/80 p-3 rounded-lg border border-gray-700 flex flex-col justify-between">
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="text-sm font-bold text-gray-300">
+                                  {currencyToFlag[item.currency]} {item.currency}
+                                </span>
+                                <span className="text-sm text-yellow-400 font-mono font-bold">
+                                  ¥{Math.round(item.totalAmount * item.rate).toLocaleString()}
+                                </span>
+                              </div>
+                              <div className="bg-black/50 p-2 rounded flex items-center gap-2">
+                                <span className="text-xs text-gray-400 font-bold w-10 truncate">{item.rawSymbol}</span>
+                                <span className="text-sm font-mono text-gray-300 flex-1 text-right">{item.totalAmount.toLocaleString()}</span>
+                                <span className="text-[10px] text-gray-500 w-12 text-right">× {item.rate.toFixed(2)}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     )}
-                  </div>
+                  </>
+                )}
+              </div>
 
-                  <div className="grid grid-cols-3 gap-3">
-                    
-                    {/* 🌟 新設：出席率パネル */}
-                    <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-center flex flex-col justify-center">
-                      <p className="text-gray-400 text-[10px] font-bold mb-1">出席率</p>
-                      <p className="text-lg font-bold text-blue-400">
-                        {viewerDetail.attendedCount} <span className="text-[10px] text-gray-500">/ {viewerDetail.totalStreams}</span>
-                      </p>
-                      <p className="text-[10px] font-bold text-blue-300 mt-1">
-                        ({viewerDetail.totalStreams > 0 ? Math.round((viewerDetail.attendedCount / viewerDetail.totalStreams) * 100) : 0}%)
-                      </p>
-                    </div>
-
-                    <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-center flex flex-col justify-center">
-                      <p className="text-gray-400 text-[10px] font-bold mb-1">累計コメント</p>
-                      <p className="text-lg font-bold text-emerald-400">
-                        {viewerDetail.totalComments.toLocaleString()} <span className="text-[10px] text-gray-500">回</span>
-                      </p>
-                    </div>
-
-                    <div className="bg-gray-800/50 p-3 rounded-xl border border-gray-700 text-center flex flex-col justify-center">
-                      <p className="text-gray-400 text-[10px] font-bold mb-1">累計スパチャ</p>
-                      <p className="text-lg font-bold text-yellow-400">
-                        <span className="text-[10px]">¥</span>{viewerDetail.totalSpacha.toLocaleString()}
-                      </p>
-                    </div>
-
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="p-4 bg-gray-950 flex justify-end border-t border-gray-800">
-              <button
-                onClick={() => setSelectedViewer(null)}
-                className="px-6 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white rounded-lg font-bold transition-all"
-              >
-                閉じる
-              </button>
+              <div className="p-4 bg-gray-950 flex justify-end border-t border-gray-800 shrink-0">
+                <button
+                  onClick={() => setSelectedViewer(null)}
+                  className="px-8 py-3 bg-gray-800 hover:bg-gray-700 border border-gray-700 text-white rounded-lg font-bold transition-all"
+                >
+                  閉じる
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 🌟 為替レート確認モーダル */}
       {isRateModalOpen && (

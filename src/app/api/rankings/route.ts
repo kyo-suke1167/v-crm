@@ -1,7 +1,9 @@
 // app/api/rankings/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { getCurrencyCaseSql } from '@/lib/exchange';
+import { getCurrencyCaseSql } from '@/lib/exchange'; // 🌟 getRatesを削除！
+import fs from 'fs';     // 🌟 追加：ファイル読み込み用
+import path from 'path'; // 🌟 追加：パス解決用
 
 export const dynamic = 'force-dynamic';
 
@@ -25,15 +27,26 @@ export async function POST(request: Request) {
         totalStreams: 0, 
         allStreams: [], 
         periodTotalAmount: 0,
-        totalActiveListeners: 0 
+        totalActiveListeners: 0,
+        periodCurrencyBreakdown: [] 
       });
     }
 
     // 2️⃣ 最新の為替レートSQLスニペットを生成
     const dynamicCurrencySql = await getCurrencyCaseSql();
 
-    // 🌟 3️⃣ 5つの重い集計処理を完全並列で実行！
-    // 修正ポイント：左側の変数リストに「totalActiveRaw」を追加したわよ！
+    // 🌟 【修正】rates.json から直接レートを読み込む！
+    let rates: Record<string, number> = {};
+    try {
+      const ratesPath = path.join(process.cwd(), 'rates.json');
+      if (fs.existsSync(ratesPath)) {
+        rates = JSON.parse(fs.readFileSync(ratesPath, 'utf-8'));
+      }
+    } catch (e) {
+      console.warn("レート読み込みエラー", e);
+    }
+
+    // 3️⃣ 5つの重い集計処理を完全並列で実行
     const [topSpachasRaw, topAttendanceRaw, topCommentsRaw, totalAmountRaw, totalActiveRaw] = await Promise.all([
       
       // ① スパチャ王
@@ -90,9 +103,57 @@ export async function POST(request: Request) {
       `
     ]);
 
+    // 期間内スパチャの「全体内訳」を取得
+    const breakdownRaw = await prisma.superChat.groupBy({
+      by: ['rawSymbol', 'currency'],
+      where: { stream: { publishedAt: { gte: start, lte: end } } },
+      _sum: { amount: true },
+      orderBy: { _sum: { amount: 'desc' } }
+    });
+    
+    // APIのレート(1円=X外貨)から、表示用(外貨×X=日本円)のレートに変換
+    const periodCurrencyBreakdown = breakdownRaw.map(b => ({
+      rawSymbol: b.rawSymbol,
+      currency: b.currency,
+      totalAmount: b._sum.amount || 0,
+      rate: rates[b.currency] ? (1 / rates[b.currency]) : 1
+    }));
+
+    // 各トップユーザーの「メイン通貨（国旗用）」を計算
+    const topViewerIds = (topSpachasRaw as any[]).map(s => s.viewerId);
+    const primaryCurrencyMap = new Map<string, string>();
+    
+    if (topViewerIds.length > 0) {
+      const userCurrencies = await prisma.superChat.groupBy({
+        by: ['viewerId', 'currency'],
+        where: { 
+          viewerId: { in: topViewerIds }, 
+          stream: { publishedAt: { gte: start, lte: end } } 
+        },
+        _sum: { amount: true }
+      });
+
+      const tempMap = new Map<string, { cur: string, amt: number }>();
+      for (const uc of userCurrencies) {
+        const current = tempMap.get(uc.viewerId);
+        
+        // 🌟 【修正】生の金額ではなく、レートを掛けた「日本円換算額」で勝負させる！
+        const rawAmt = Number(uc._sum.amount || 0);
+        const rateMultiplier = rates[uc.currency] ? (1 / rates[uc.currency]) : 1;
+        const jpyAmt = rawAmt * rateMultiplier;
+
+        // 日本円ベースでの貢献度が一番高い通貨を「メイン国旗」として採用するわ！
+        if (!current || current.amt < jpyAmt) {
+          tempMap.set(uc.viewerId, { cur: uc.currency, amt: jpyAmt });
+        }
+      }
+      for (const [vId, data] of tempMap.entries()) {
+        primaryCurrencyMap.set(vId, data.cur);
+      }
+    }
+
     // 欠席判定用の詳細取得
     const topAttendanceViewerIds = (topAttendanceRaw as any[]).map(user => user.viewerId);
-    
     const attendanceDetails = await prisma.comment.findMany({
       where: {
         viewerId: { in: topAttendanceViewerIds },
@@ -120,14 +181,18 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      topSpachas: (topSpachasRaw as any[]).map(s => ({ ...formatUser(s), totalAmount: Number(s.totalAmount || 0) })),
+      topSpachas: (topSpachasRaw as any[]).map(s => ({ 
+        ...formatUser(s), 
+        totalAmount: Number(s.totalAmount || 0),
+        primaryCurrency: primaryCurrencyMap.get(s.viewerId) || "JPY" 
+      })),
       topAttendance: (topAttendanceRaw as any[]).map(user => ({ ...formatUser(user), count: Number(user.count || 0), attendedStreamIds: Array.from(attendedMap.get(user.viewerId) || []) })),
       topComments: (topCommentsRaw as any[]).map(c => ({ ...formatUser(c), count: Number(c.count || 0) })),
       totalStreams,
       allStreams,
       periodTotalAmount: Number((totalAmountRaw as any)[0]?.total || 0),
-      // 🌟 修正：totalActiveRaw を使うように変更！
-      totalActiveListeners: Number((totalActiveRaw as any)[0]?.totalActive || 0)
+      totalActiveListeners: Number((totalActiveRaw as any)[0]?.totalActive || 0),
+      periodCurrencyBreakdown 
     });
 
   } catch (error: any) {
